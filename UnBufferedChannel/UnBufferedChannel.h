@@ -1,10 +1,14 @@
 #pragma once
 
+//! Threading
 #include <mutex>
 #include <condition_variable>
 
+//! Channel Interface
+#include "IChannel.h"
+
 template <typename T>
-class UnBufferedChannel
+class UnBufferedChannel : public IChannel<T>
 {
 public:
     //! Block till any previous values are Read
