@@ -7,7 +7,8 @@ LIBS_PATH := ../../
 
 CXX := g++
 CXXFLAGS := -Wall -Wextra -g -O0 -std=c++17 -MMD -MP
-INCLUDES := -I$(LIBS_PATH)/UnBufferedChannel
+INCLUDES := -I$(LIBS_PATH)/Channels/UnBufferedChannel \
+-I$(LIBS_PATH)/Channels
 
 $(TARGET): $(OBJS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(OBJS) -o $@
