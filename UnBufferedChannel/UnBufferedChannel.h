@@ -10,13 +10,34 @@ public:
     //! Block till any previous values are Read
     //! this should block caller till some other thread read any previously store values
     //! this should be called by writer / producer thread
-    void SendValue(T &p_tValue)
+    bool SendValue(T &p_tValue)
     {
-        std::lock_guard<std::mutex> lock{m_oMutex};
+        std::unique_lock<std::mutex> lock{m_oMutex};
+
+        //! Block until previous value is consumed
+        m_oCv.wait(lock, [this]()
+                   { return !m_bIsValueRecieved || m_bIsTerminationRequested; });
+
+        if (m_bIsTerminationRequested)
+        {
+            return false;
+        }
+
         //! Move value set by Writer / producer thread
         m_tRecievedValue = p_tValue;
         m_bIsValueRecieved = true;
         m_oCv.notify_one();
+
+        //! Block until value Handled
+        //! this is not necesscary , you can fire and forget ; since the following send call will block till consumption any way
+        //! this just ensure that when send returns a reciever has 100% handled my request
+        //! removing it is logically correct , and won't cause any race conditions
+        //! this is More Like GO style of Channels
+        //! Handles Backpressure, so that producers don't run so far ahead
+        // m_oCv.wait(lock, [this]()
+        //    { return !m_bIsValueRecieved || m_bIsTerminationRequested; });
+
+        return !m_bIsTerminationRequested;
     }
 
     //! Block till value is available
@@ -39,6 +60,8 @@ public:
         //! Consume and reset
         p_tValue = m_tRecievedValue;
         Reset();
+        //! TEMP FIX
+        m_oCv.notify_all();
         return true;
     }
 
@@ -46,7 +69,7 @@ public:
     {
         std::lock_guard<std::mutex> lock{m_oMutex};
         m_bIsTerminationRequested = true;
-        m_oCv.notify_one();
+        m_oCv.notify_all();
     }
 
 private:
