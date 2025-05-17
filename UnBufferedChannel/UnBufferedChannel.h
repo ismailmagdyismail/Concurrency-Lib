@@ -14,9 +14,9 @@ public:
     {
         std::unique_lock<std::mutex> lock{m_oMutex};
 
-        //! Block until previous value is consumed
-        m_oCv.wait(lock, [this]()
-                   { return !m_bIsValueRecieved || m_bIsTerminationRequested; });
+        //! Block producers until previous value is consumed
+        m_oSendCv.wait(lock, [this]()
+                       { return !m_bIsValueRecieved || m_bIsTerminationRequested; });
 
         if (m_bIsTerminationRequested)
         {
@@ -26,16 +26,7 @@ public:
         //! Move value set by Writer / producer thread
         m_tRecievedValue = p_tValue;
         m_bIsValueRecieved = true;
-        m_oCv.notify_one();
-
-        //! Block until value Handled
-        //! this is not necesscary , you can fire and forget ; since the following send call will block till consumption any way
-        //! this just ensure that when send returns a reciever has 100% handled my request
-        //! removing it is logically correct , and won't cause any race conditions
-        //! this is More Like GO style of Channels
-        //! Handles Backpressure, so that producers don't run so far ahead
-        // m_oCv.wait(lock, [this]()
-        //    { return !m_bIsValueRecieved || m_bIsTerminationRequested; });
+        m_oRecieveCv.notify_one();
 
         return !m_bIsTerminationRequested;
     }
@@ -46,8 +37,9 @@ public:
     bool ReadValue(T &p_tValue)
     {
         std::unique_lock<std::mutex> lock{m_oMutex};
-        m_oCv.wait(lock, [this]()
-                   { return m_bIsValueRecieved || m_bIsTerminationRequested; });
+        //! Block consumers till a value is written
+        m_oRecieveCv.wait(lock, [this]()
+                          { return m_bIsValueRecieved || m_bIsTerminationRequested; });
 
         //! Channel was cleared
         //! Consume and reset
@@ -60,8 +52,7 @@ public:
         //! Consume and reset
         p_tValue = m_tRecievedValue;
         Reset();
-        //! TEMP FIX
-        m_oCv.notify_all();
+        m_oSendCv.notify_one();
         return true;
     }
 
@@ -69,7 +60,8 @@ public:
     {
         std::lock_guard<std::mutex> lock{m_oMutex};
         m_bIsTerminationRequested = true;
-        m_oCv.notify_all();
+        m_oRecieveCv.notify_all();
+        m_oSendCv.notify_all();
     }
 
 private:
@@ -85,6 +77,7 @@ private:
     bool m_bIsTerminationRequested{false};
 
     //! Synchronization
-    std::condition_variable m_oCv;
+    std::condition_variable m_oSendCv;    //! for producers
+    std::condition_variable m_oRecieveCv; //! for consumers
     std::mutex m_oMutex;
 };
