@@ -1,20 +1,32 @@
 #pragma once
 
+//! System includes
 #include <functional>
 #include <thread>
-#include <atomic>
+
+//! Channels
+#include "UnBufferedChannel.h"
+
+struct ThreadOperationMessage
+{
+    std::function<void(void)> m_fMessageHandler;
+};
 
 class Thread
 {
 public:
-    Thread(std::function<void(void)> &&p_oWorker);
+    Thread();
     ~Thread();
 
-    void Start();
+    void Start(std::function<void(void)> &&p_oWorker);
+    void Pause();
     void Stop();
 
 private:
+    void Run();
+
+    UnBufferedChannel<ThreadOperationMessage> m_oChannel;
     std::function<void(void)> m_oWorker;
     std::thread m_oThread;
-    std::atomic<bool> m_bIsTerminated{false};
+    bool m_bIsTerminated{false};
 };

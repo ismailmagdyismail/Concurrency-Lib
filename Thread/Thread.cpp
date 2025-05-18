@@ -2,36 +2,46 @@
 
 #include "Thread.h"
 
-Thread::Thread(std::function<void(void)> &&p_oWorker)
-    : m_oWorker(std::move(p_oWorker))
+Thread::Thread()
 {
+    m_oThread = std::thread(&Thread::Run, this);
 }
 
-void Thread::Start()
+void Thread::Run()
 {
-    if (m_bIsTerminated || m_oThread.joinable())
+    while (!m_bIsTerminated)
     {
-        std::cerr << "Thread is Used after termination" << std::endl;
-        return;
-        // throw std::logic_error("Thread is Used after termination");
+        ThreadOperationMessage oMessage;
+        m_oChannel.ReadValue(oMessage);
+        oMessage.m_fMessageHandler();
+        m_oWorker = nullptr;
     }
-    std::function<void(void)> fWorker = [this]()
+}
+
+void Thread::Start(std::function<void(void)> &&p_oWorker)
+{
+    ThreadOperationMessage oMessage;
+    oMessage.m_fMessageHandler = [this, worker = std::move(p_oWorker)]()
     {
-        while (!m_bIsTerminated)
-        {
-            m_oWorker();
-        }
+        m_oWorker = std::move(worker);
+        m_oWorker();
     };
-    m_oThread = std::thread(fWorker);
+    m_oChannel.SendValue(oMessage);
 }
 
 void Thread::Stop()
 {
-    m_bIsTerminated = true;
+    ThreadOperationMessage oMessage;
+    oMessage.m_fMessageHandler = [this]()
+    {
+        m_bIsTerminated = true;
+    };
+    m_oChannel.SendValue(oMessage);
 }
 
 Thread::~Thread()
 {
+    Stop();
     if (m_oThread.joinable())
     {
         m_oThread.join();
