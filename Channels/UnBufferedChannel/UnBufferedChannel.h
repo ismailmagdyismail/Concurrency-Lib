@@ -32,7 +32,7 @@ public:
         m_bIsValueRecieved = true;
         m_oRecieveCv.notify_one();
 
-        return !m_bIsTerminationRequested;
+        return true;
     }
 
     //! Block till value is available
