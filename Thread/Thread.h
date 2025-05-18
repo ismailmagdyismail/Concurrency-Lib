@@ -18,7 +18,7 @@ public:
     Thread();
     ~Thread();
 
-    void Start(std::function<void(void)> &&p_oWorker);
+    void StartTask(std::function<void(void)> &&p_oWorker);
     void Pause();
     void Stop();
 
@@ -26,7 +26,7 @@ private:
     void Run();
 
     UnBufferedChannel<ThreadOperationMessage> m_oChannel;
-    std::function<void(void)> m_oWorker;
+    std::function<void(void)> m_oTask;
     std::thread m_oThread;
     bool m_bIsTerminated{false};
 };

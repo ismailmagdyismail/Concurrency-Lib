@@ -12,19 +12,24 @@ void Thread::Run()
     while (!m_bIsTerminated)
     {
         ThreadOperationMessage oMessage;
-        m_oChannel.ReadValue(oMessage);
+        bool bResult = m_oChannel.ReadValue(oMessage);
+        //! If No Result where read (Channel may have been terminated)
+        if (!bResult)
+        {
+            continue;
+        }
         oMessage.m_fMessageHandler();
-        m_oWorker = nullptr;
     }
 }
 
-void Thread::Start(std::function<void(void)> &&p_oWorker)
+void Thread::StartTask(std::function<void(void)> &&p_oWorker)
 {
     ThreadOperationMessage oMessage;
     oMessage.m_fMessageHandler = [this, worker = std::move(p_oWorker)]()
     {
-        m_oWorker = std::move(worker);
-        m_oWorker();
+        m_oTask = std::move(worker);
+        m_oTask();
+        m_oTask = nullptr;
     };
     m_oChannel.SendValue(oMessage);
 }
@@ -34,16 +39,21 @@ void Thread::Stop()
     ThreadOperationMessage oMessage;
     oMessage.m_fMessageHandler = [this]()
     {
+        //! Set Termination Signal to stop thread
         m_bIsTerminated = true;
+        //! Close Communication Channel
+        //! Any future Stop Requests will have any effect since channel is closed
+        //! And closed channels cannot be reused
+        m_oChannel.Close();
     };
     m_oChannel.SendValue(oMessage);
 }
 
 Thread::~Thread()
 {
-    Stop();
     if (m_oThread.joinable())
     {
+        Stop();
         m_oThread.join();
     }
 }
