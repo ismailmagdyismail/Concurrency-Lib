@@ -19,7 +19,6 @@ public:
     ~Thread();
 
     void StartTask(std::function<void(void)> &&p_oWorker);
-    void Pause();
     void Stop();
 
 private:
