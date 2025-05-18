@@ -68,11 +68,18 @@ public:
         m_oSendCv.notify_all();
     }
 
+    ~UnBufferedChannel()
+    {
+        Close();
+    }
+
 private:
     void Reset()
     {
         m_bIsValueRecieved = false;
-        m_bIsTerminationRequested = false;
+        //! No Resetting to Termination Flag
+        //! a Closed Channel cannot be reused For NOW
+        // m_bIsTerminationRequested = false;
     }
 
     //! Value received on the channel
