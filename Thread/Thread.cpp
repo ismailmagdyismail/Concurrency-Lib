@@ -31,7 +31,7 @@ void Thread::StartTask(std::function<void(void)> &&p_oWorker)
         m_oTask();
         m_oTask = nullptr;
     };
-    m_oChannel.SendValue(oMessage);
+    m_oChannel.SendValue(std::move(oMessage));
 }
 
 void Thread::Stop()
@@ -46,7 +46,7 @@ void Thread::Stop()
         //! And closed channels cannot be reused
         m_oChannel.Close();
     };
-    m_oChannel.SendValue(oMessage);
+    m_oChannel.SendValue(std::move(oMessage));
 }
 
 Thread::~Thread()

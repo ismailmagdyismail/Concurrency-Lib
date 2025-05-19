@@ -14,7 +14,7 @@ public:
     //! Block till any previous values are Read
     //! this should block caller till some other thread read any previously store values
     //! this should be called by writer / producer thread
-    bool SendValue(T &p_tValue)
+    bool SendValue(T &&p_tValue)
     {
         std::unique_lock<std::mutex> lock{m_oMutex};
 
@@ -28,7 +28,7 @@ public:
         }
 
         //! Move value set by Writer / producer thread
-        m_tRecievedValue = p_tValue;
+        m_tRecievedValue = std::move(p_tValue);
         m_bIsValueRecieved = true;
         m_oRecieveCv.notify_one();
 

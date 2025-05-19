@@ -13,13 +13,13 @@ public:
     void Increment()
     {
         int delta = 1;
-        m_oUpdateChannel.SendValue(delta);
+        m_oUpdateChannel.SendValue(std::move(delta));
     }
 
     void Decrement()
     {
         int delta = -1;
-        m_oUpdateChannel.SendValue(delta);
+        m_oUpdateChannel.SendValue(std::move(delta));
     }
 
     void Stop()
