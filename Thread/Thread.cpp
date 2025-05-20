@@ -4,10 +4,10 @@
 
 Thread::Thread()
 {
-    m_oThread = std::thread(&Thread::Run, this);
+    m_oThread = std::thread(&Thread::EventLoop, this);
 }
 
-void Thread::Run()
+void Thread::EventLoop()
 {
     while (!m_bIsTerminated)
     {

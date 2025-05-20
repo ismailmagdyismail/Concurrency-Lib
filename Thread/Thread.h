@@ -12,6 +12,10 @@ struct ThreadOperationMessage
     std::function<void(void)> m_fMessageHandler;
 };
 
+/*
+-  a Channel / Message Based thread
+- Could be implmented using a simpler lock-based approach
+*/
 class Thread
 {
 public:
@@ -22,7 +26,7 @@ public:
     void Stop();
 
 private:
-    void Run();
+    void EventLoop();
 
     UnBufferedChannel<ThreadOperationMessage> m_oChannel;
     std::function<void(void)> m_oTask;
