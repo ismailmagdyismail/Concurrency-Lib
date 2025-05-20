@@ -14,23 +14,37 @@ public:
     //! Block till any previous values are Read
     //! this should block caller till some other thread read any previously store values
     //! this should be called by writer / producer thread
-    bool SendValue(T &&p_tValue)
+    virtual bool SendValue(T &&p_tValue) override
     {
-        std::unique_lock<std::mutex> lock{m_oMutex};
-
-        //! Block producers until previous value is consumed
-        m_oSendCv.wait(lock, [this]()
-                       { return !m_bIsValueRecieved || m_bIsTerminationRequested; });
-
-        if (m_bIsTerminationRequested)
+        //! Lock is released after updating internal state
+        //! This is important cause of the callback that we call (user defined code)
+        //! What if that user code uses that same channel again to Send while we are holding mutex!!
+        //! => Deadlock || Undefined behaviour cause of multiple locking within same thread
+        //! So we release lock
+        //! Also this minimized suprios wakeups on the Consumer threads
         {
-            return false;
-        }
+            std::unique_lock<std::mutex> lock{m_oMutex};
 
-        //! Move value set by Writer / producer thread
-        m_tRecievedValue = std::move(p_tValue);
-        m_bIsValueRecieved = true;
+            //! Block producers until previous value is consumed
+            m_oSendCv.wait(lock, [this]()
+                           { return !m_bIsValueRecieved || m_bIsTerminationRequested; });
+
+            if (m_bIsTerminationRequested)
+            {
+                return false;
+            }
+
+            //! Move value set by Writer / producer thread
+            m_tRecievedValue = std::move(p_tValue);
+            m_bIsValueRecieved = true;
+        }
         m_oRecieveCv.notify_one();
+
+        //! Notify that Data Available
+        //! this happens within the context of the thread that creates and puts it on the channel (Producer)
+        //! Lock is release before calling it , to avoid deadlocks
+        // if (m_fOnDataAvailableCallback)
+        // m_fOnDataAvailableCallback();
 
         return true;
     }
@@ -38,32 +52,36 @@ public:
     //! Block till value is available
     //! this should block caller till some other thread puts a value on the channel
     //! this should be called by reader / consumer thread
-    bool ReadValue(T &p_tValue)
+    virtual bool ReadValue(T &p_tValue) override
     {
-        std::unique_lock<std::mutex> lock{m_oMutex};
-        //! Block consumers till a value is written
-        m_oRecieveCv.wait(lock, [this]()
-                          { return m_bIsValueRecieved || m_bIsTerminationRequested; });
-
-        //! Channel was cleared
-        //! Consume and reset
-        if (m_bIsTerminationRequested)
         {
-            Reset();
-            return false;
-        }
+            std::unique_lock<std::mutex> lock{m_oMutex};
+            //! Block consumers till a value is written
+            m_oRecieveCv.wait(lock, [this]()
+                              { return m_bIsValueRecieved || m_bIsTerminationRequested; });
 
-        //! Consume and reset
-        p_tValue = m_tRecievedValue;
-        Reset();
+            //! Channel was cleared
+            //! Consume and reset
+            if (m_bIsTerminationRequested)
+            {
+                Reset();
+                return false;
+            }
+
+            //! Consume and reset
+            p_tValue = m_tRecievedValue;
+            Reset();
+        }
         m_oSendCv.notify_one();
         return true;
     }
 
-    void Close()
+    virtual void Close() override
     {
-        std::lock_guard<std::mutex> lock{m_oMutex};
-        m_bIsTerminationRequested = true;
+        {
+            std::lock_guard<std::mutex> lock{m_oMutex};
+            m_bIsTerminationRequested = true;
+        }
         m_oRecieveCv.notify_all();
         m_oSendCv.notify_all();
     }

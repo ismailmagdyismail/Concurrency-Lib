@@ -22,48 +22,59 @@ public:
         }
     }
 
-    bool SendValue(T &&p_tValue)
+    virtual bool SendValue(T &&p_tValue) override
     {
-        std::unique_lock<std::mutex> olock{m_oBufferMutex};
-
-        //! Block till a slot is available in the buffer
-        m_oSlotAvailableCv.wait(olock, [this]()
-                                { return m_oBuffer.size() < m_sChannelMaxSize || m_bIsTerminated; });
-
-        if (m_bIsTerminated)
+        //! Lock is released after updating internal state
+        //! This is important cause of the callback that we call (user defined code)
+        //! What if that user code uses that same channel again to Send while we are holding mutex!!
+        //! => Deadlock || Undefined behaviour cause of multiple locking within same thread
+        //! So we release lock
+        //! Also this minimized suprios wakeups on the Consumer threads
         {
-            return false;
+            std::unique_lock<std::mutex> olock{m_oBufferMutex};
+            //! Block till a slot is available in the buffer
+            m_oSlotAvailableCv.wait(olock, [this]()
+                                    { return m_oBuffer.size() < m_sChannelMaxSize || m_bIsTerminated; });
+
+            if (m_bIsTerminated)
+            {
+                return false;
+            }
+            m_oBuffer.push(std::move(p_tValue));
         }
-        m_oBuffer.push(std::move(p_tValue));
+
         //! Notify anyone waiting to read from the buffer that a value is available
         m_oRecieveCv.notify_one();
         return true;
     }
 
-    bool ReadValue(T &p_tValue)
+    virtual bool ReadValue(T &p_tValue) override
     {
-        std::unique_lock<std::mutex> olock{m_oBufferMutex};
-        //! Block till a value is available in the buffer, i.e Not Empty
-        m_oRecieveCv.wait(olock, [this]()
-                          { return !m_oBuffer.empty() || m_bIsTerminated; });
-        if (m_bIsTerminated)
         {
-            return false;
+            std::unique_lock<std::mutex> olock{m_oBufferMutex};
+            //! Block till a value is available in the buffer, i.e Not Empty
+            m_oRecieveCv.wait(olock, [this]()
+                              { return !m_oBuffer.empty() || m_bIsTerminated; });
+            if (m_bIsTerminated)
+            {
+                return false;
+            }
+
+            //! Consume value
+            p_tValue = std::move(m_oBuffer.front());
+            m_oBuffer.pop();
         }
-
-        //! Consume value
-        p_tValue = std::move(m_oBuffer.front());
-        m_oBuffer.pop();
-
         //! Notify Prodcuers that a slot has become available
         m_oSlotAvailableCv.notify_one();
         return true;
     }
 
-    void Close()
+    virtual void Close() override
     {
-        std::lock_guard<std::mutex> oLock{m_oBufferMutex};
-        m_bIsTerminated = true;
+        {
+            std::lock_guard<std::mutex> oLock{m_oBufferMutex};
+            m_bIsTerminated = true;
+        }
         m_oSlotAvailableCv.notify_all();
         m_oRecieveCv.notify_all();
     }
