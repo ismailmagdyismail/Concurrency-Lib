@@ -43,8 +43,8 @@ public:
         //! Notify that Data Available
         //! this happens within the context of the thread that creates and puts it on the channel (Producer)
         //! Lock is release before calling it , to avoid deadlocks
-        // if (m_fOnDataAvailableCallback)
-        // m_fOnDataAvailableCallback();
+        std::cerr << "NOTIFY Listener\n";
+        NotifyOnDataAvailableListeners();
 
         return true;
     }
@@ -76,6 +76,21 @@ public:
         return true;
     }
 
+    virtual bool TryReadValue(T &p_tValue) override
+    {
+        {
+            std::lock_guard<std::mutex> oLock{m_oMutex};
+            if (m_bIsTerminationRequested || !m_bIsValueRecieved)
+            {
+                return false;
+            }
+            p_tValue = m_tRecievedValue;
+            Reset();
+        }
+        m_oSendCv.notify_one();
+        return true;
+    }
+
     virtual void Close() override
     {
         {
@@ -84,14 +99,48 @@ public:
         }
         m_oRecieveCv.notify_all();
         m_oSendCv.notify_all();
+        NotifyOnCloseListeners();
     }
 
     ~UnBufferedChannel()
     {
+        std::cerr << "CHANNEL CLOSED" << std::endl;
         Close();
     }
 
+protected:
+    virtual void RegisterChannelOperationsListener(
+        std::function<void(void)> p_fOnDataAvailableCallback,
+        std::function<void(void)> p_fOnCloseAvailableCallback) override
+    {
+        std::lock_guard<std::mutex> oLock{m_oListenersMutex};
+        m_vecOnCloseListeners.push_back(std::move(p_fOnCloseAvailableCallback));
+        m_vecOnDataAvailableListeners.push_back(std::move(p_fOnDataAvailableCallback));
+        std::cerr << "m_vecOnDataAvailableListeners" << m_vecOnDataAvailableListeners.size() << std::endl;
+    }
+
 private:
+    void NotifyOnDataAvailableListeners()
+    {
+        std::cerr << "NotifyOnDataAvailableListeners " << m_vecOnDataAvailableListeners.size() << std::endl;
+
+        std::lock_guard<std::mutex> oLock{m_oListenersMutex};
+        for (auto &listener : m_vecOnDataAvailableListeners)
+        {
+            std::cerr << "LISTNER\n";
+            listener();
+        }
+    }
+    void NotifyOnCloseListeners()
+    {
+        std::cerr << "NotifyOnCloseListeners" << std::endl;
+        std::lock_guard<std::mutex> oLock{m_oListenersMutex};
+        for (auto &listener : m_vecOnCloseListeners)
+        {
+            listener();
+        }
+    }
+
     void Reset()
     {
         m_bIsValueRecieved = false;
@@ -109,4 +158,9 @@ private:
     std::condition_variable m_oSendCv;    //! for producers
     std::condition_variable m_oRecieveCv; //! for consumers
     std::mutex m_oMutex;
+
+    //! Listeners for Channel operations
+    std::mutex m_oListenersMutex;
+    std::vector<std::function<void(void)>> m_vecOnDataAvailableListeners;
+    std::vector<std::function<void(void)>> m_vecOnCloseListeners;
 };
