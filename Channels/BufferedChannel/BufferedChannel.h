@@ -106,31 +106,39 @@ public:
     }
 
 protected:
-    //! Some C++ dumb shit
-    virtual void RegisterChannelOperationsListener(
+    virtual unsigned long long RegisterChannelOperationsListener(
         std::function<void(void)> p_fOnDataAvailableCallback,
         std::function<void(void)> p_fOnCloseAvailableCallback) override
     {
         std::lock_guard<std::mutex> oLock{m_oListenersMutex};
-        m_vecOnCloseListeners.push_back(std::move(p_fOnCloseAvailableCallback));
-        m_vecOnDataAvailableListeners.push_back(std::move(p_fOnDataAvailableCallback));
+        unsigned long long iIdToUse = m_iID;
+        m_oOnDataAvailableListeners[iIdToUse] = std::move(p_fOnDataAvailableCallback);
+        m_oOnCloseListeners[iIdToUse] = std::move(p_fOnCloseAvailableCallback);
+        m_iID++;
+        return iIdToUse;
+    }
+
+    virtual void UnRegisterChannelOperationsListener(int p_iId) override
+    {
+        m_oOnDataAvailableListeners.erase(p_iId);
+        m_oOnCloseListeners.erase(p_iId);
     }
 
 private:
     void NotifyOnDataAvailableListeners()
     {
         std::lock_guard<std::mutex> oLock{m_oListenersMutex};
-        for (auto &listener : m_vecOnDataAvailableListeners)
+        for (auto &entry : m_oOnDataAvailableListeners)
         {
-            listener();
+            entry.second();
         }
     }
     void NotifyOnCloseListeners()
     {
         std::lock_guard<std::mutex> oLock{m_oListenersMutex};
-        for (auto &listener : m_vecOnCloseListeners)
+        for (auto &entry : m_oOnCloseListeners)
         {
-            listener();
+            entry.second();
         }
     }
 
@@ -144,6 +152,7 @@ private:
 
     //! Listeners for Channel operations
     std::mutex m_oListenersMutex;
-    std::vector<std::function<void(void)>> m_vecOnDataAvailableListeners;
-    std::vector<std::function<void(void)>> m_vecOnCloseListeners;
+    std::map<int, std::function<void(void)>> m_oOnDataAvailableListeners;
+    std::map<int, std::function<void(void)>> m_oOnCloseListeners;
+    unsigned long long m_iID{0};
 };

@@ -16,8 +16,9 @@ public:
 protected:
     //! This is kinda of a leaky abstract, I did it to support Multiplexing channels / Select statement
     //! could be made protected , Select/Multiplexer class marked as friend
-    virtual void RegisterChannelOperationsListener(
+    virtual unsigned long long RegisterChannelOperationsListener(
         std::function<void(void)> m_fOnDataAvailableCallback,
         std::function<void(void)> m_fOnCloseAvailableCallback) = 0;
+    virtual void UnRegisterChannelOperationsListener(int) = 0;
     friend class ChannelSelector;
 };
