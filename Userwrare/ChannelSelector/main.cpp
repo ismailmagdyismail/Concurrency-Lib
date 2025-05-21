@@ -7,7 +7,7 @@
 #include <chrono>
 #include <fstream>
 
-bool BUFFERED = false;
+bool BUFFERED = true;
 
 class SingleProducerScenario
 {
@@ -19,9 +19,6 @@ public:
         {
             channel->SendValue("MEssage from producer thread");
         }
-        std::cerr << "Producer About to Close Select....\n";
-        selector.Close();
-        std::cerr << "Producer Closed it\n";
     }
 
     void Consumer()
@@ -39,14 +36,27 @@ public:
 
     void Run()
     {
-        channel = std::make_shared<UnBufferedChannel<std::string>>();
+        if (BUFFERED)
+        {
+            channel = std::make_shared<BufferedChannel<std::string>>(100);
+        }
+        else
+        {
+            channel = std::make_shared<UnBufferedChannel<std::string>>();
+        }
         selector.AddChannel<std::string>(channel, [this](std::string &channelInput)
                                          { logFile << "Consumer Read value: " << channelInput << std::endl; });
 
         std::thread p1{&SingleProducerScenario::Producer, this};
-
         std::thread c{&SingleProducerScenario::Consumer, this};
+
         p1.join();
+        if (BUFFERED)
+        {
+            std::cerr << "Sleeping casue this is a buffer (async) channel , consumer may not be finished" << std::endl;
+            std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+        }
+        selector.Close();
         c.join();
     }
 
@@ -104,6 +114,11 @@ public:
             {
                 std::cerr << "producer  " << i << " Not joinable" << std::endl;
             }
+        }
+        if (BUFFERED)
+        {
+            std::cerr << "Sleeping casue this is a buffer (async) channel , consumer may not be finished" << std::endl;
+            std::this_thread::sleep_for(std::chrono::milliseconds(3000));
         }
         std::cerr << "ALl producers Finished,  Main thread About to Close Select....\n";
         selector.Close();
@@ -191,6 +206,11 @@ public:
             }
         }
         std::cerr << "ALl producers Finished,  Main thread About to Close Select....\n";
+        if (BUFFERED)
+        {
+            std::cerr << "Sleeping casue this is a buffer (async) channel , consumer may not be finished" << std::endl;
+            std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+        }
         selector.Close();
         std::cerr << "Main Closed it\n";
 
@@ -282,7 +302,13 @@ public:
                 std::cerr << "producer  " << i << " Not joinable" << std::endl;
             }
         }
+
         std::cerr << "ALl producers Finished,  Main thread About to Close Select....\n";
+        if (BUFFERED)
+        {
+            std::cerr << "Sleeping casue this is a buffer (async) channel , consumer may not be finished" << std::endl;
+            std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+        }
         selector.Close();
         std::cerr << "Main Closed it\n";
 
@@ -392,6 +418,11 @@ public:
             }
         }
         std::cerr << "ALl producers Finished,  Main thread About to Close Select....\n";
+        if (BUFFERED)
+        {
+            std::cerr << "Sleeping casue this is a buffer (async) channel , consumer may not be finished" << std::endl;
+            std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+        }
         selector.Close();
         std::cerr << "Main Closed it\n";
 
@@ -548,6 +579,12 @@ public:
             }
         }
         std::cerr << "ALl producers Finished,  Main thread About to Close Select....\n";
+        if (BUFFERED)
+        {
+            std::cerr << "Sleeping casue this is a buffer (async) channel , consumer may not be finished" << std::endl;
+            std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+        }
+
         selector.Close();
         selector2.Close();
         channel1->Close();
