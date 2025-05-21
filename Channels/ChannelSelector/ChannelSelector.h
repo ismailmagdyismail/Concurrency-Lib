@@ -32,7 +32,7 @@ public:
 
 private:
     template <typename T>
-    bool ReadAndDecorateHandler(std::shared_ptr<IChannel<T>> p_pChannel, std::function<void(T &)> p_fOnChannelDataAvailable, std::function<void(void)> *p_foutDecoratedHandlerCallback);
+    bool ReadAndDecorateHandler(std::shared_ptr<IChannel<T>> p_pChannel, std::function<void(T &)> p_fOnChannelDataAvailable, unsigned long long, std::function<void(void)> *p_foutDecoratedHandlerCallback);
     bool SelectAndReadFromAvailableChannel(std::function<void(void)> *p_fHandler);
     bool AnyChannelReady();
 
@@ -50,10 +50,9 @@ private:
 
     std::mutex m_oChannelsStateMutex;
     std::condition_variable m_oChannelReadyCv;
-    bool m_bChannelReady;
     unsigned long long m_ullChannelId = 0;
     std::map<unsigned long long, std::pair<unsigned long long, std::function<void(void)>>> m_oChannelsUnRegisterationHandlers;
-    std::map<unsigned long long, bool> m_oChannelsState;
+    std::map<unsigned long long, unsigned long long> m_oChannelsState;
     std::map<unsigned long long, std::function<bool(std::function<void(void)> *)>> m_oChannelsHandlers;
 
     bool m_bIsTerminated{false};
@@ -70,7 +69,7 @@ private:
 //! Q: Why are Handler for each Case statement is handled / executed while not Holding Lock ??:
 //!     the handler is user defined code , holding lock while executing this user code has two risks
 //!     1- if user's code involve heavy computation ? this will block all others for uncesseary time
-//!     2- if user's code recalls some method from channel => 
+//!     2- if user's code recalls some method from channel =>
 //!             Deadlock (OR undefined behaviour according to C++ standard , double locking withing same thread)
 
 template <typename T>
@@ -79,9 +78,9 @@ void ChannelSelector::AddChannel(std::shared_ptr<IChannel<T>> p_pChannel, std::f
     std::lock_guard<std::mutex> oLock{m_oChannelsStateMutex};
     unsigned long long ullChanneldId = m_ullChannelId;
 
-    m_oChannelsHandlers[ullChanneldId] = [p_pChannel, p_fOnChannelDataAvailable, this](std::function<void(void)> *p_fOutExecutionCallback) -> bool
+    m_oChannelsHandlers[ullChanneldId] = [p_pChannel, p_fOnChannelDataAvailable, ullChanneldId, this](std::function<void(void)> *p_fOutExecutionCallback) -> bool
     {
-        return ReadAndDecorateHandler<T>(p_pChannel, p_fOnChannelDataAvailable, p_fOutExecutionCallback);
+        return ReadAndDecorateHandler<T>(p_pChannel, p_fOnChannelDataAvailable, ullChanneldId, p_fOutExecutionCallback);
     };
 
     //! a copy of that pointer is kept, not ref since this will be executed in an async way (in the future)
@@ -91,7 +90,7 @@ void ChannelSelector::AddChannel(std::shared_ptr<IChannel<T>> p_pChannel, std::f
     auto onDataAvailableHandler = std::bind(&ChannelSelector::HandleChannelInputReady, this, ullChanneldId);
     auto onChannelCloseHandler = std::bind(&ChannelSelector::HandleChannelClose, this, ullChanneldId);
     unsigned long long ullSelectorId = p_pChannel->RegisterChannelOperationsListener(onDataAvailableHandler, onChannelCloseHandler);
-    m_oChannelsUnRegisterationHandlers[m_ullChannelId] = {
+    m_oChannelsUnRegisterationHandlers[ullChanneldId] = {
         ullSelectorId,
         [ullSelectorId, p_pChannel]()
         { p_pChannel->UnRegisterChannelOperationsListener(ullSelectorId); }};
@@ -111,9 +110,8 @@ void ChannelSelector::HandleChannelInputReady(unsigned long long p_ullChannelId)
     std::lock_guard<std::mutex>
         oLock{m_oChannelsStateMutex};
     //! mark which channel was mark ready for faster checking
-    m_oChannelsState[p_ullChannelId] = true;
+    m_oChannelsState[p_ullChannelId]++;
     //! Announce that some channel is ready
-    m_bChannelReady = true;
     m_oChannelReadyCv.notify_one();
 }
 
@@ -121,6 +119,7 @@ template <typename T>
 bool ChannelSelector::ReadAndDecorateHandler(
     std::shared_ptr<IChannel<T>> p_pChannel,
     std::function<void(T &)> p_fOnChannelDataAvailable,
+    unsigned long long p_ullChanneldId,
     std::function<void(void)> *p_fOutDecoratedHandler)
 {
     /*
@@ -136,6 +135,12 @@ bool ChannelSelector::ReadAndDecorateHandler(
         {
             p_fOnChannelDataAvailable(tVal);
         };
+    }
+    //! If No data available for that channel , then it must have been consumed by other threads in the mean time
+    //! so mark it to 0 , I am holding the mutex anyway so any new data will increment counter after i exit this function
+    else
+    {
+        m_oChannelsState[p_ullChanneldId] = 0;
     }
     return bResult;
 }
@@ -156,7 +161,6 @@ bool ChannelSelector::SelectAndExecute()
             return false;
         }
         //! Consume Data
-        m_bChannelReady = false;
         bool bIsChannelReady = SelectAndReadFromAvailableChannel(&fChannelHandler);
         //! No channel was ready
         if (!bIsChannelReady)
@@ -177,7 +181,7 @@ bool ChannelSelector::AnyChannelReady()
 {
     for (auto &entry : m_oChannelsState)
     {
-        if (entry.second)
+        if (entry.second > 0)
         {
             return true;
         }
@@ -189,20 +193,14 @@ bool ChannelSelector::SelectAndReadFromAvailableChannel(std::function<void(void)
 {
     for (auto &channelEntry : m_oChannelsState)
     {
-        if (!channelEntry.second)
+        if (channelEntry.second <= 0)
         {
             continue;
         }
         auto handlerIt = m_oChannelsHandlers.find(channelEntry.first);
         bool readSuccess = handlerIt->second(p_fOutDecoratedHandler);
-        channelEntry.second = false;
+        channelEntry.second--;
         return readSuccess;
-        // auto handlerIt = m_oChannelsHandlers.find(channelEntry.first);
-        // std::function<bool(std::function<void(void)> & p_fOutDecoratedHandler)> handler = handlerIt->second;
-        //! Consume value available
-        //! Reset state , TryReading value from channel
-        // channelEntry.second = false;
-        // return handler(p_fOutDecoratedHandler);
     }
     return false;
 }
@@ -226,9 +224,6 @@ void ChannelSelector::Close()
     m_bIsTerminated = true;
     m_oChannelReadyCv.notify_all();
     UnRegisterFromAllChannels();
-    // //! TODO: remove when 1 is done
-    // m_oChannelsHandlers.clear();
-    // m_oChannelsState.clear();
 }
 
 ChannelSelector::~ChannelSelector()
