@@ -1,5 +1,8 @@
 #pragma once
 
+//!
+#include <map>
+
 //! Threading
 #include <mutex>
 #include <condition_variable>
