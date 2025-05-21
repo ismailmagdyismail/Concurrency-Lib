@@ -43,6 +43,7 @@ private:
     */
     void HandleChannelInputReady(unsigned long long p_ullChannelId);
     void HandleChannelClose(unsigned long long p_ullChanneldId);
+    void UnRegisterFromAllChannels();
 
     bool isEmpty() const;
 
@@ -50,6 +51,7 @@ private:
     std::condition_variable m_oChannelReadyCv;
     bool m_bChannelReady;
     unsigned long long m_ullChannelId = 0;
+    std::map<unsigned long long, std::pair<unsigned long long, std::function<void(void)>>> m_oChannelsUnRegisterationHandlers;
     std::map<unsigned long long, bool> m_oChannelsState;
     std::map<unsigned long long, std::function<bool(std::function<void(void)> *)>> m_oChannelsHandlers;
 
@@ -76,14 +78,18 @@ void ChannelSelector::AddChannel(std::shared_ptr<IChannel<T>> p_pChannel, std::f
         return ReadAndDecorateHandler<T>(p_pChannel, p_fOnChannelDataAvailable, p_fOutExecutionCallback);
     };
 
-    m_ullChannelId++;
     //! a copy of that pointer is kept, not ref since this will be executed in an async way (in the future)
     //! the HandleChannelInput is what is stored , not user passed callback ,
     //! We want the callback to be as light weight as possible and ALSO we want to execute user code in the consumers context
     //! HandleChannelInput just notifies any waiting threads (cosnumers) , and the user callback is executed in that context
     auto onDataAvailableHandler = std::bind(&ChannelSelector::HandleChannelInputReady, this, ullChanneldId);
     auto onChannelCloseHandler = std::bind(&ChannelSelector::HandleChannelClose, this, ullChanneldId);
-    p_pChannel->RegisterChannelOperationsListener(onDataAvailableHandler, onChannelCloseHandler);
+    unsigned long long ullSelectorId = p_pChannel->RegisterChannelOperationsListener(onDataAvailableHandler, onChannelCloseHandler);
+    m_oChannelsUnRegisterationHandlers[m_ullChannelId] = {
+        ullSelectorId,
+        [ullSelectorId, p_pChannel]()
+        { p_pChannel->UnRegisterChannelOperationsListener(ullSelectorId); }};
+    m_ullChannelId++;
 }
 
 void ChannelSelector::HandleChannelClose(unsigned long long p_ullChanneldId)
@@ -200,15 +206,23 @@ bool ChannelSelector::isEmpty() const
     return m_oChannelsHandlers.size() == 0;
 }
 
+void ChannelSelector::UnRegisterFromAllChannels()
+{
+    for (auto &channelUnRegisterationHandlerEntry : m_oChannelsUnRegisterationHandlers)
+    {
+        channelUnRegisterationHandlerEntry.second.second();
+    }
+}
+
 void ChannelSelector::Close()
 {
-    //! TODO: 1- Un register yourself from all channels
     std::lock_guard<std::mutex> oLock{m_oChannelsStateMutex};
     m_bIsTerminated = true;
     m_oChannelReadyCv.notify_all();
-    //! TODO: remove when 1 is done
-    m_oChannelsHandlers.clear();
-    m_oChannelsState.clear();
+    UnRegisterFromAllChannels();
+    // //! TODO: remove when 1 is done
+    // m_oChannelsHandlers.clear();
+    // m_oChannelsState.clear();
 }
 
 ChannelSelector::~ChannelSelector()
