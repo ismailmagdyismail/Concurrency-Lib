@@ -12,7 +12,6 @@
 #include "IChannel.h"
 
 /*
-    - [Check] what if multiple channels notify at the same time
     - Support multiple listeners on that same select channel
     - Support multiple diff Select statements at the same time
     - Support readers from one of the member channels directly, not through select statement
@@ -40,6 +39,8 @@ private:
     /*
         @breif callbacks for handling channels listeners operations
         - lightweight functions that just notify waiting threads
+        - should be lightwieght in order not to block producers of data
+        - they execute in the context of the producers on a certain channel , so we try to be as efficient as possible
     */
     void HandleChannelInputReady(unsigned long long p_ullChannelId);
     void HandleChannelClose(unsigned long long p_ullChanneldId);
@@ -66,6 +67,11 @@ private:
 //!     to avoid lost notifications, what if a two channels notify
 //! Q: Why not block till consumer (SelectAndExecute) ready that value ?
 //!     we want the callback registerd to be Async, fire and forget in order to not impact other listeners on that channel
+//! Q: Why are Handler for each Case statement is handled / executed while not Holding Lock ??:
+//!     the handler is user defined code , holding lock while executing this user code has two risks
+//!     1- if user's code involve heavy computation ? this will block all others for uncesseary time
+//!     2- if user's code recalls some method from channel => 
+//!             Deadlock (OR undefined behaviour according to C++ standard , double locking withing same thread)
 
 template <typename T>
 void ChannelSelector::AddChannel(std::shared_ptr<IChannel<T>> p_pChannel, std::function<void(T &)> &&p_fOnChannelDataAvailable)
