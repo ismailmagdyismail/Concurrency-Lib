@@ -92,7 +92,15 @@ public:
 
     void Run()
     {
-        channel = std::make_shared<UnBufferedChannel<std::string>>();
+        if (BUFFERED)
+        {
+            channel = std::make_shared<BufferedChannel<std::string>>(100);
+        }
+        else
+        {
+            channel = std::make_shared<UnBufferedChannel<std::string>>();
+        }
+
         selector.AddChannel<std::string>(channel, [this](std::string &channelInput)
                                          { logFile << "Consumer Read value: " << channelInput << std::endl; });
 
@@ -159,9 +167,18 @@ public:
 
     void Run()
     {
-        channel1 = std::make_shared<UnBufferedChannel<std::string>>();
-        channel2 = std::make_shared<UnBufferedChannel<std::string>>();
-        channel3 = std::make_shared<UnBufferedChannel<std::string>>();
+        if (BUFFERED)
+        {
+            channel1 = std::make_shared<BufferedChannel<std::string>>(100);
+            channel2 = std::make_shared<BufferedChannel<std::string>>(100);
+            channel3 = std::make_shared<BufferedChannel<std::string>>(100);
+        }
+        else
+        {
+            channel1 = std::make_shared<UnBufferedChannel<std::string>>();
+            channel2 = std::make_shared<UnBufferedChannel<std::string>>();
+            channel3 = std::make_shared<UnBufferedChannel<std::string>>();
+        }
 
         selector.AddChannel<std::string>(channel1, [this](std::string &channelInput)
                                          { logFile << "Consumer Read value From Channel 1: " << channelInput << std::endl; });
@@ -252,9 +269,18 @@ public:
 
     void Run()
     {
-        channel1 = std::make_shared<UnBufferedChannel<std::string>>();
-        channel2 = std::make_shared<UnBufferedChannel<std::string>>();
-        channel3 = std::make_shared<UnBufferedChannel<std::string>>();
+        if (BUFFERED)
+        {
+            channel1 = std::make_shared<BufferedChannel<std::string>>(100);
+            channel2 = std::make_shared<BufferedChannel<std::string>>(100);
+            channel3 = std::make_shared<BufferedChannel<std::string>>(100);
+        }
+        else
+        {
+            channel1 = std::make_shared<UnBufferedChannel<std::string>>();
+            channel2 = std::make_shared<UnBufferedChannel<std::string>>();
+            channel3 = std::make_shared<UnBufferedChannel<std::string>>();
+        }
 
         std::mutex mx;
 
@@ -367,9 +393,18 @@ public:
 
     void Run()
     {
-        channel1 = std::make_shared<UnBufferedChannel<std::string>>();
-        channel2 = std::make_shared<UnBufferedChannel<int>>();
-        channel3 = std::make_shared<UnBufferedChannel<double>>();
+        if (BUFFERED)
+        {
+            channel1 = std::make_shared<BufferedChannel<std::string>>(100);
+            channel2 = std::make_shared<BufferedChannel<int>>(100);
+            channel3 = std::make_shared<BufferedChannel<double>>(100);
+        }
+        else
+        {
+            channel1 = std::make_shared<UnBufferedChannel<std::string>>();
+            channel2 = std::make_shared<UnBufferedChannel<int>>();
+            channel3 = std::make_shared<UnBufferedChannel<double>>();
+        }
 
         std::mutex mx;
 
@@ -518,9 +553,18 @@ public:
 
     void Run()
     {
-        channel1 = std::make_shared<UnBufferedChannel<std::string>>();
-        channel2 = std::make_shared<UnBufferedChannel<int>>();
-        channel3 = std::make_shared<UnBufferedChannel<double>>();
+        if (BUFFERED)
+        {
+            channel1 = std::make_shared<BufferedChannel<std::string>>(100);
+            channel2 = std::make_shared<BufferedChannel<int>>(100);
+            channel3 = std::make_shared<BufferedChannel<double>>(100);
+        }
+        else
+        {
+            channel1 = std::make_shared<UnBufferedChannel<std::string>>();
+            channel2 = std::make_shared<UnBufferedChannel<int>>();
+            channel3 = std::make_shared<UnBufferedChannel<double>>();
+        }
 
         selector.AddChannel<std::string>(channel1, [this](std::string &channelInput)
                                          { std::lock_guard<std::mutex>lock{mx}; logFile << "[Selector1]:Consumer Read value From String-Channel 1: " << channelInput<<std::endl; });
