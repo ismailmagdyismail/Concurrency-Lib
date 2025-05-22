@@ -1,7 +1,6 @@
 #pragma once
 
 //! System includes
-
 #include <map>
 
 //! Threading
@@ -18,46 +17,6 @@
     - Support Diff Input channels sources with DIFF DATA TYPESSSSSS
 */
 
-#include <iostream>
-
-class ChannelSelector
-{
-public:
-    template <typename T>
-    void AddChannel(std::shared_ptr<IChannel<T>> p_pChannel, std::function<void(T &)> &&p_fOnChannelDataAvailable);
-    bool SelectAndExecute();
-    void Close();
-
-    ~ChannelSelector();
-
-private:
-    template <typename T>
-    bool ReadAndDecorateHandler(std::shared_ptr<IChannel<T>> p_pChannel, std::function<void(T &)> p_fOnChannelDataAvailable, unsigned long long, std::function<void(void)> *p_foutDecoratedHandlerCallback);
-    bool SelectAndReadFromAvailableChannel(std::function<void(void)> *p_fHandler);
-    bool AnyChannelReady();
-
-    /*
-        @breif callbacks for handling channels listeners operations
-        - lightweight functions that just notify waiting threads
-        - should be lightwieght in order not to block producers of data
-        - they execute in the context of the producers on a certain channel , so we try to be as efficient as possible
-    */
-    void HandleChannelInputReady(unsigned long long p_ullChannelId);
-    void HandleChannelClose(unsigned long long p_ullChanneldId);
-    void UnRegisterFromAllChannels();
-
-    bool isEmpty() const;
-
-    std::mutex m_oChannelsStateMutex;
-    std::condition_variable m_oChannelReadyCv;
-    unsigned long long m_ullChannelId = 0;
-    std::map<unsigned long long, std::pair<unsigned long long, std::function<void(void)>>> m_oChannelsUnRegisterationHandlers;
-    std::map<unsigned long long, unsigned long long> m_oChannelsState;
-    std::map<unsigned long long, std::function<bool(std::function<void(void)> *)>> m_oChannelsHandlers;
-
-    bool m_bIsTerminated{false};
-};
-
 //! Questions / Edgecases:
 //! Q: Why are We using TryReceive instead of Receive:
 //!     since there may be other listners on those channels (through selectors or actual channels ) that have already read that value
@@ -72,161 +31,174 @@ private:
 //!     2- if user's code recalls some method from channel =>
 //!             Deadlock (OR undefined behaviour according to C++ standard , double locking withing same thread)
 
-template <typename T>
-void ChannelSelector::AddChannel(std::shared_ptr<IChannel<T>> p_pChannel, std::function<void(T &)> &&p_fOnChannelDataAvailable)
+class ChannelSelector
 {
-    std::lock_guard<std::mutex> oLock{m_oChannelsStateMutex};
-    unsigned long long ullChanneldId = m_ullChannelId;
-
-    m_oChannelsHandlers[ullChanneldId] = [p_pChannel, p_fOnChannelDataAvailable, ullChanneldId, this](std::function<void(void)> *p_fOutExecutionCallback) -> bool
+public:
+    template <typename T>
+    void AddChannel(std::shared_ptr<IChannel<T>> p_pChannel, std::function<void(T &)> &&p_fOnChannelDataAvailable)
     {
-        return ReadAndDecorateHandler<T>(p_pChannel, p_fOnChannelDataAvailable, ullChanneldId, p_fOutExecutionCallback);
-    };
+        std::lock_guard<std::mutex> oLock{m_oChannelsStateMutex};
+        unsigned long long ullChanneldId = m_ullChannelId;
 
-    //! a copy of that pointer is kept, not ref since this will be executed in an async way (in the future)
-    //! the HandleChannelInput is what is stored , not user passed callback ,
-    //! We want the callback to be as light weight as possible and ALSO we want to execute user code in the consumers context
-    //! HandleChannelInput just notifies any waiting threads (cosnumers) , and the user callback is executed in that context
-    auto onDataAvailableHandler = std::bind(&ChannelSelector::HandleChannelInputReady, this, ullChanneldId);
-    auto onChannelCloseHandler = std::bind(&ChannelSelector::HandleChannelClose, this, ullChanneldId);
-    unsigned long long ullSelectorId = p_pChannel->RegisterChannelOperationsListener(onDataAvailableHandler, onChannelCloseHandler);
-    m_oChannelsUnRegisterationHandlers[ullChanneldId] = {
-        ullSelectorId,
-        [ullSelectorId, p_pChannel]()
-        { p_pChannel->UnRegisterChannelOperationsListener(ullSelectorId); }};
-    m_ullChannelId++;
-}
+        m_oChannelsHandlers[ullChanneldId] = [p_pChannel, p_fOnChannelDataAvailable, ullChanneldId, this](std::function<void(void)> *p_fOutExecutionCallback) -> bool
+        {
+            return ReadAndDecorateHandler<T>(p_pChannel, p_fOnChannelDataAvailable, ullChanneldId, p_fOutExecutionCallback);
+        };
 
-void ChannelSelector::HandleChannelClose(unsigned long long p_ullChanneldId)
-{
-    std::lock_guard<std::mutex> oLock{m_oChannelsStateMutex};
-    m_oChannelsHandlers.erase(p_ullChanneldId);
-    m_oChannelsState.erase(p_ullChanneldId);
-}
+        //! a copy of that pointer is kept, not ref since this will be executed in an async way (in the future)
+        //! the HandleChannelInput is what is stored , not user passed callback ,
+        //! We want the callback to be as light weight as possible and ALSO we want to execute user code in the consumers context
+        //! HandleChannelInput just notifies any waiting threads (cosnumers) , and the user callback is executed in that context
+        auto onDataAvailableHandler = std::bind(&ChannelSelector::HandleChannelInputReady, this, ullChanneldId);
+        auto onChannelCloseHandler = std::bind(&ChannelSelector::HandleChannelClose, this, ullChanneldId);
+        unsigned long long ullSelectorId = p_pChannel->RegisterChannelOperationsListener(onDataAvailableHandler, onChannelCloseHandler);
+        m_oChannelsUnRegisterationHandlers[ullChanneldId] = {
+            ullSelectorId,
+            [ullSelectorId, p_pChannel]()
+            { p_pChannel->UnRegisterChannelOperationsListener(ullSelectorId); }};
+        m_ullChannelId++;
+    }
+    bool SelectAndExecute()
+    {
+        std::function<void(void)> fChannelHandler;
+        {
+            //! Muiltple Threads may be selecting from multiple channels , so this should be thread safe
+            std::unique_lock<std::mutex> oLock{m_oChannelsStateMutex};
 
-void ChannelSelector::HandleChannelInputReady(unsigned long long p_ullChannelId)
-{
-    //! as light weight as possible, to prevent blocking Producers that produced message
-    std::lock_guard<std::mutex>
-        oLock{m_oChannelsStateMutex};
-    //! mark which channel was mark ready for faster checking
-    m_oChannelsState[p_ullChannelId]++;
-    //! Announce that some channel is ready
-    m_oChannelReadyCv.notify_one();
-}
+            //! Wait till on of the channels has data ready
+            m_oChannelReadyCv.wait(oLock, [this]()
+                                   { return m_bIsTerminated || AnyChannelReady() || isEmpty(); });
 
-template <typename T>
-bool ChannelSelector::ReadAndDecorateHandler(
-    std::shared_ptr<IChannel<T>> p_pChannel,
-    std::function<void(T &)> p_fOnChannelDataAvailable,
-    unsigned long long p_ullChanneldId,
-    std::function<void(void)> *p_fOutDecoratedHandler)
-{
-    /*
+            if (m_bIsTerminated)
+            {
+                return false;
+            }
+            //! Consume Data
+            bool bIsChannelReady = SelectAndReadFromAvailableChannel(&fChannelHandler);
+            //! No channel was ready
+            if (!bIsChannelReady)
+            {
+                return true;
+            }
+        }
+        //! [IMP]
+        //! Execute user code, without holding lock
+        //! - So Other producers can put data without waiting on use code to finish
+        //! - So if UserCode has loop or Sleep for example we don't need to block other producers from putting data on this channel
+        //! - So we can Avoid Deadlocks if user tries calling other operations that hold that same Lock (double locking from same thread)
+        fChannelHandler();
+        return true;
+    }
+    void Close()
+    {
+        std::lock_guard<std::mutex> oLock{m_oChannelsStateMutex};
+        m_bIsTerminated = true;
+        m_oChannelReadyCv.notify_all();
+        UnRegisterFromAllChannels();
+    }
+
+    ~ChannelSelector()
+    {
+        Close();
+    }
+
+private:
+    template <typename T>
+    bool ReadAndDecorateHandler(std::shared_ptr<IChannel<T>> p_pChannel, std::function<void(T &)> p_fOnChannelDataAvailable, unsigned long long p_ullChanneldId, std::function<void(void)> *p_fOutDecoratedHandler)
+    {
+        /*
         - Try Read value from the channel if availble
         - Created a callback with Read value passed as closure to be able to use it in a templated fashion and have type knowledge
+        */
+        T tVal;
+        bool bResult = p_pChannel->TryReadValue(tVal);
+        if (bResult)
+        {
+            //! C++ is stupid BTW
+            *p_fOutDecoratedHandler = [p_fOnChannelDataAvailable, tVal]() mutable
+            {
+                p_fOnChannelDataAvailable(tVal);
+            };
+        }
+        //! If No data available for that channel , then it must have been consumed by other threads in the mean time
+        //! so mark it to 0 , I am holding the mutex anyway so any new data will increment counter after i exit this function
+        else
+        {
+            m_oChannelsState[p_ullChanneldId] = 0;
+        }
+        return bResult;
+    }
+    bool SelectAndReadFromAvailableChannel(std::function<void(void)> *p_fOutDecoratedHandler)
+    {
+        for (auto &channelEntry : m_oChannelsState)
+        {
+            if (channelEntry.second <= 0)
+            {
+                continue;
+            }
+            auto handlerIt = m_oChannelsHandlers.find(channelEntry.first);
+            bool readSuccess = handlerIt->second(p_fOutDecoratedHandler);
+            channelEntry.second--;
+            return readSuccess;
+        }
+        return false;
+    }
+
+    bool AnyChannelReady()
+    {
+        for (auto &entry : m_oChannelsState)
+        {
+            if (entry.second > 0)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /*
+        @breif callbacks for handling channels listeners operations
+        - lightweight functions that just notify waiting threads
+        - should be lightwieght in order not to block producers of data
+        - they execute in the context of the producers on a certain channel , so we try to be as efficient as possible
     */
-    T tVal;
-    bool bResult = p_pChannel->TryReadValue(tVal);
-    if (bResult)
+    void HandleChannelInputReady(unsigned long long p_ullChannelId)
     {
-        //! C++ is stupid BTW
-        *p_fOutDecoratedHandler = [p_fOnChannelDataAvailable, tVal]() mutable
-        {
-            p_fOnChannelDataAvailable(tVal);
-        };
+        //! as light weight as possible, to prevent blocking Producers that produced message
+        std::lock_guard<std::mutex>
+            oLock{m_oChannelsStateMutex};
+        //! mark which channel was mark ready for faster checking
+        m_oChannelsState[p_ullChannelId]++;
+        //! Announce that some channel is ready
+        m_oChannelReadyCv.notify_one();
     }
-    //! If No data available for that channel , then it must have been consumed by other threads in the mean time
-    //! so mark it to 0 , I am holding the mutex anyway so any new data will increment counter after i exit this function
-    else
+    void HandleChannelClose(unsigned long long p_ullChanneldId)
     {
-        m_oChannelsState[p_ullChanneldId] = 0;
+        std::lock_guard<std::mutex> oLock{m_oChannelsStateMutex};
+        m_oChannelsHandlers.erase(p_ullChanneldId);
+        m_oChannelsState.erase(p_ullChanneldId);
     }
-    return bResult;
-}
 
-bool ChannelSelector::SelectAndExecute()
-{
-    std::function<void(void)> fChannelHandler;
+    void UnRegisterFromAllChannels()
     {
-        //! Muiltple Threads may be selecting from multiple channels , so this should be thread safe
-        std::unique_lock<std::mutex> oLock{m_oChannelsStateMutex};
 
-        //! Wait till on of the channels has data ready
-        m_oChannelReadyCv.wait(oLock, [this]()
-                               { return m_bIsTerminated || AnyChannelReady() || isEmpty(); });
-
-        if (m_bIsTerminated)
+        for (auto &channelUnRegisterationHandlerEntry : m_oChannelsUnRegisterationHandlers)
         {
-            return false;
-        }
-        //! Consume Data
-        bool bIsChannelReady = SelectAndReadFromAvailableChannel(&fChannelHandler);
-        //! No channel was ready
-        if (!bIsChannelReady)
-        {
-            return true;
+            channelUnRegisterationHandlerEntry.second.second();
         }
     }
-    //! [IMP]
-    //! Execute user code, without holding lock
-    //! - So Other producers can put data without waiting on use code to finish
-    //! - So if UserCode has loop or Sleep for example we don't need to block other producers from putting data on this channel
-    //! - So we can Avoid Deadlocks if user tries calling other operations that hold that same Lock (double locking from same thread)
-    fChannelHandler();
-    return true;
-}
 
-bool ChannelSelector::AnyChannelReady()
-{
-    for (auto &entry : m_oChannelsState)
+    bool isEmpty() const
     {
-        if (entry.second > 0)
-        {
-            return true;
-        }
+        return m_oChannelsHandlers.size() == 0;
     }
-    return false;
-}
 
-bool ChannelSelector::SelectAndReadFromAvailableChannel(std::function<void(void)> *p_fOutDecoratedHandler)
-{
-    for (auto &channelEntry : m_oChannelsState)
-    {
-        if (channelEntry.second <= 0)
-        {
-            continue;
-        }
-        auto handlerIt = m_oChannelsHandlers.find(channelEntry.first);
-        bool readSuccess = handlerIt->second(p_fOutDecoratedHandler);
-        channelEntry.second--;
-        return readSuccess;
-    }
-    return false;
-}
+    std::mutex m_oChannelsStateMutex;
+    std::condition_variable m_oChannelReadyCv;
+    unsigned long long m_ullChannelId = 0;
+    std::map<unsigned long long, std::pair<unsigned long long, std::function<void(void)>>> m_oChannelsUnRegisterationHandlers;
+    std::map<unsigned long long, unsigned long long> m_oChannelsState;
+    std::map<unsigned long long, std::function<bool(std::function<void(void)> *)>> m_oChannelsHandlers;
 
-bool ChannelSelector::isEmpty() const
-{
-    return m_oChannelsHandlers.size() == 0;
-}
-
-void ChannelSelector::UnRegisterFromAllChannels()
-{
-    for (auto &channelUnRegisterationHandlerEntry : m_oChannelsUnRegisterationHandlers)
-    {
-        channelUnRegisterationHandlerEntry.second.second();
-    }
-}
-
-void ChannelSelector::Close()
-{
-    std::lock_guard<std::mutex> oLock{m_oChannelsStateMutex};
-    m_bIsTerminated = true;
-    m_oChannelReadyCv.notify_all();
-    UnRegisterFromAllChannels();
-}
-
-ChannelSelector::~ChannelSelector()
-{
-    Close();
-}
+    bool m_bIsTerminated{false};
+};
