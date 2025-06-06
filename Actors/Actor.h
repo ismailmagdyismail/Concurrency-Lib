@@ -11,9 +11,9 @@ class Actor
 public:
     Actor(std::function<void(void)> &&p_fEventLoopOperations);
     bool Start();
-    bool Stop();
+    virtual bool Stop();
     bool Pause();
-    ~Actor();
+    virtual ~Actor();
 
 private:
     void EventLoop();
