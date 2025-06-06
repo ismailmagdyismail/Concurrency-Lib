@@ -23,7 +23,22 @@ public:
         }
     }
 
+    //! Block till any previous values are Read
+    //! this should block caller till some other thread read any previously store values
+    //! this should be called by writer / producer thread
     virtual bool SendValue(T &&p_tValue) override
+    {
+        constexpr bool bMove = true;
+        return SendValue(p_tValue, bMove);
+    }
+
+    virtual bool SendValue(T &p_tValue) override
+    {
+        constexpr bool bMove = false;
+        return SendValue(p_tValue, bMove);
+    }
+
+    bool SendValue(T &p_tValue, bool p_bMove)
     {
         //! Lock is released after updating internal state
         //! This is important cause of the callback that we call (user defined code)
@@ -41,7 +56,16 @@ public:
             {
                 return false;
             }
-            m_oBuffer.push(std::move(p_tValue));
+            if (p_bMove)
+            {
+                //! Move
+                m_oBuffer.push(std::move(p_tValue));
+            }
+            else
+            {
+                //! Copy
+                m_oBuffer.push(p_tValue);
+            }
         }
 
         //! Notify anyone waiting to read from the buffer that a value is available

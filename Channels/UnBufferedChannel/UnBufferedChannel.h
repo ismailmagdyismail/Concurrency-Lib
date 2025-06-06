@@ -19,6 +19,18 @@ public:
     //! this should be called by writer / producer thread
     virtual bool SendValue(T &&p_tValue) override
     {
+        constexpr bool bMove = true;
+        return SendValue(p_tValue, bMove);
+    }
+
+    virtual bool SendValue(T &p_tValue) override
+    {
+        constexpr bool bMove = false;
+        return SendValue(p_tValue, bMove);
+    }
+
+    bool SendValue(T &p_tValue, bool p_bMove)
+    {
         //! Lock is released after updating internal state
         //! This is important cause of the callback that we call (user defined code)
         //! What if that user code uses that same channel again to Send while we are holding mutex!!
@@ -36,9 +48,17 @@ public:
             {
                 return false;
             }
+            if (p_bMove)
+            {
+                //! Move value set by Writer / producer thread
+                m_tRecievedValue = std::move(p_tValue);
+            }
+            else
+            {
+                //! Copy
+                m_tRecievedValue = p_tValue;
+            }
 
-            //! Move value set by Writer / producer thread
-            m_tRecievedValue = std::move(p_tValue);
             m_bIsValueRecieved = true;
         }
         m_oRecieveCv.notify_one();

@@ -7,6 +7,7 @@ class IChannel
 {
 public:
     virtual bool SendValue(T &&p_tValue) = 0;
+    virtual bool SendValue(T &p_tValue) = 0;
     virtual bool ReadValue(T &p_tValue) = 0;
     virtual bool TryReadValue(T &p_tValue) = 0;
     virtual void Close() = 0;
